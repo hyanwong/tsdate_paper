@@ -22,6 +22,7 @@ def get_pairwise_tmrca_pops(
     num_processes=1,
     restrict_populations=None,
     return_raw_data=False,
+    min_tMRCA=1.0,
 ):
     """
     Get the mean tMRCA and a histogram of tMRCA times for pairs of populations from a
@@ -39,8 +40,11 @@ def get_pairwise_tmrca_pops(
     :param list restrict_populations: A list of population IDs or names giving the
         populations among which to calculate pairwise distances. If ``None`` (default)
         then use all the populations defined in the tree sequence.
-    :param bool return_raw_data is True, also return the full dataset of weights (which
+    :param bool return_raw_data: If True, also return the full dataset of weights (which
         may be huge, as it is ~ num_unique_times * n_pops * n_pops /2
+    :param float min_tMRCA: the minimum tMRCA time allowed. Tsdate may put nodes at
+        a time < 1 generation. If this is 1 (the default), then any value < 1 is treated
+        as being at time 1 (if time is in generations, this makes complete sense)
 
     :return: a TmrcaData object containing a dataframe of the mean values for each
         pair, a HistData object with the histogram data, and (if return_full_data is
@@ -68,7 +72,7 @@ def get_pairwise_tmrca_pops(
     unique_times, time_index = np.unique(node_ages, return_inverse=True)
     with np.errstate(divide='ignore'):
         log_unique_times = np.log(unique_times)
-
+        log_t_trunc = np.where(log_unique_times < min_tMRCA, min_tMRCA, log_unique_times)
     # Make a random selection of up to 10 samples from each population
     np.random.seed(123)
     pop_nodes = ts.tables.nodes.population[ts.samples()]
@@ -111,13 +115,12 @@ def get_pairwise_tmrca_pops(
         ):
             popA = pop_names[combo[0]]
             popB = pop_names[combo[1]]
-            keep = (tmrca_weight != 0)  # Deal with log_unique_times[0] == -inf
-            mean_log_age = np.sum(log_unique_times[keep] * tmrca_weight[keep])
+            mean_log_age = np.sum(log_t_trunc * tmrca_weight)
             mean_log_age /= np.sum(tmrca_weight) # Normalise
             tmrca_df.loc[popA, popB] = np.exp(mean_log_age)
             data[combo_map[combo], :] = tmrca_weight
     bins, hist_data = make_histogram_data(
-        log_unique_times, data, hist_nbins, hist_min_gens)
+        log_t_trunc, data, hist_nbins, hist_min_gens)
     named_combos = [None] * len(combo_map)
     for combo, i in combo_map.items():
         named_combos[i] = (pop_names[combo[0]], pop_names[combo[1]])
